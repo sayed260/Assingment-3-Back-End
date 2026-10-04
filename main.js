@@ -1,188 +1,611 @@
-/*
-? Q1. What is the Node.js Event Loop?
-The Event Loop is the mechanism that allows Node.js to handle asynchronous and non-blocking operations
-while using a single main JavaScript thread.
-
-? Q2. What is Libuv and What Role Does It Play in Node.js?
-Libuv is a C library used by Node.js to provide asynchronous I/O operations and the Event Loop.
-It handles operations such as:
-- File System operations
-- DNS operations
-- Network operations
-- Timers
-- Thread Pool management
-
-? Q3. How Does Node.js Handle Asynchronous Operations Under the Hood?
-When Node.js starts an asynchronous operation, it does not block the main JavaScript thread.
-The operation is handled by the appropriate system mechanism or Libuv's Thread Pool. When the operation finishes, its callback is placed in the appropriate queue.
-
-
-? Q4. What is the Difference Between the Call Stack, Event Queue, and Event Loop in Node.js?
- the Call Stack executes synchronous code, the Event Queue stores asynchronous callbacks awaiting execution,
- and the Event Loop acts as the coordinator that moves tasks from the queue to the stack when the stack is completely empty.
-
-
-
-? Q5. What is the Node.js Thread Pool and How to Set the Thread Pool Size?
-The Node.js Thread Pool is a group of worker threads managed by Libuv. It is used for certain expensive operations that should not block the main JavaScript thread.
-
-? Q6. How Does Node.js Handle Blocking and Non-Blocking Code Execution?
-Blocking code stops the main JavaScript thread until the operation finishes. This prevents the Event Loop from handling other requests.
-*/
-
-
-// ************* part 2 *************
+const dotenv = require('dotenv');
+dotenv.config();
 
 const fs = require('node:fs/promises');
 const path = require('node:path');
+
+const pg = require('pg');
 
 const express = require('express')
 const {use} = require("express/lib/application");
 const app = express()
 const port = 3000
 
-const pathFile = path.resolve('users.json');
-
-async function saveUser(content) {
-
-        return await fs.writeFile(pathFile, JSON.stringify(content , null , 2), 'utf-8');
-
-}
-
-async function getUsers() {
-        const data =  await fs.readFile(pathFile, 'utf-8');
-        const users = JSON.parse(data)
-        return users;
-}
-
-app.use(express.json())
+const pool = new pg.Pool({
+    user: process.env.DB_USER,
+    host: process.env.DB_HOST,
+    database: process.env.DB_DATABASE,
+    password: process.env.DB_PASSWORD,
+    port: process.env.DB_PORT,
+});
 
 
-// add user
+app.use(express.json());
 
-app.post('/user', async (req , res)=>{
-    const data = req.body;
+app.get('/test', async (req, res) => {
+
+    const {id , name}= req.body
+
+    const client = await pool.connect();
+
     try {
-        const users = await getUsers();
-        const existEmail = users.find(user => user.email === data.email);
-        if(existEmail) {
-            return res.status(400).json({message: 'Email already exists'});
-        }
-        const newUser = {id: users.length? Math.max(...users.map(user => user.id)) + 1: 1  , ...data};
+        const { rows } = await pool.query(
+            'SELECT 1 + 1 AS result'
+        );
 
-        await saveUser([...users , newUser]);
+        return res.json({
+            message: 'Test route is working',
+            data: rows
+        });
 
-        return res.status(201).json({message: 'User created successfully'});
     } catch (error) {
-        return res.status(500).json({message: 'Error creating user'});
+        console.error(error);
+
+        return res.status(500).json({
+            message: 'Database connection failed',
+            error: error.message
+        });
+    }
+});
+
+
+
+// Get all products
+app.get("/products", async (req, res) => {
+    try {
+        const { rows } = await pool.query('SELECT * FROM products');
+    return res.status(200).json({message:'done', data: rows });
+    } catch (error) {
+        res.status(500).json({message:'error', error: error.message})
+    }
+});
+
+// Get product by ID
+app.get("/products/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { rows } = await pool.query('SELECT * FROM products WHERE product_id = $1', [id]);
+    return res.status(200).json({ data:rows });
+    } catch (error) {
+        json({message:'error', error: error.message})
+    }
+});
+
+// Update product by ID
+app.patch ("/products/:id", async (req , res)=>{
+
+    const { id } = req.params;
+    const {name , price, stock} = req.body
+
+    try {
+        const { rows } = await pool.query(
+            'UPDATE products SET product_name = $1, price = $2, stock_quantity = $3 WHERE product_id = $4 RETURNING *',
+            [name, price, stock, id]
+        );
+        return res.status(200).json({ message: 'Product updated', data: rows[0] });
+    } catch (error) {
+res.status(500).json({ message: 'Error creating product', error: error.message });    }
+
+})
+
+// Delete product by ID
+app.delete ("/products/:id", async (req , res)=>{
+
+    const { id } = req.params;
+    
+
+    try {
+        const { rows } = await pool.query(
+            'DELETE FROM products WHERE product_id = $1 RETURNING *',
+            [id]
+        );
+        return res.status(200).json({ message: 'Product deleted', data: rows[0] });
+    } catch (error) {
+res.status(500).json({ message: 'Error deleting product', error: error.message });    }
+
+})
+
+// Create a new product
+app.post ("/products", async (req , res)=>{
+
+    const {name , price, stock} = req.body
+
+    try {
+        const { rows } = await pool.query(
+            'INSERT INTO products (product_name, price, stock_quantity) VALUES ($1, $2, $3) RETURNING *',
+            [name, price, stock]
+        );
+        return res.status(201).json({ message: 'Product created', data: rows[0] });
+    } catch (error) {
+res.status(500).json({ message: 'Error creating product', error: error.message });    }
+
+})
+
+
+
+
+// ********************* Suppliers
+// Get all suppliers
+app.get("/suppliers", async (req, res) => {
+    try {
+        const { rows } = await pool.query('SELECT * FROM suppliers');
+    return res.status(200).json({message:'done', data: rows });
+    } catch (error) {
+        res.status(500).json({message:'error', error: error.message})
+    }
+});
+
+// Get supplier by ID
+app.get("/suppliers/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { rows } = await pool.query('SELECT * FROM suppliers WHERE supplier_id = $1', [id]);
+    return res.status(200).json({ data:rows });
+    } catch (error) {
+        json({message:'error', error: error.message})
+    }
+});
+
+// Update supplier by ID
+app.patch ("/suppliers/:id", async (req , res)=>{
+
+    const { id } = req.params;
+    const {name , number} = req.body
+
+    try {
+        const { rows } = await pool.query(
+            'UPDATE suppliers SET supplier_name = $1, contact_number = $2 WHERE supplier_id = $3 RETURNING *',
+            [name, number, id]
+        );
+        return res.status(200).json({ message: 'supplier updated', data: rows[0] });
+    } catch (error) {
+res.status(500).json({ message: 'Error creating supplier', error: error.message });    }
+
+})
+
+// Delete supplier by ID
+app.delete ("/suppliers/:id", async (req , res)=>{
+
+    const { id } = req.params;
+    
+
+    try {
+        const { rows } = await pool.query(
+            'DELETE FROM suppliers WHERE supplier_id = $1 RETURNING *',
+            [id]
+        );
+        return res.status(200).json({ message: 'supplier deleted', data: rows[0] });
+    } catch (error) {
+res.status(500).json({ message: 'Error deleting supplier', error: error.message });    }
+
+})
+
+// Create a new supplier
+app.post ("/suppliers", async (req , res)=>{
+
+    const {name , number} = req.body
+
+    try {
+        const { rows } = await pool.query(
+            'INSERT INTO suppliers (supplier_name, contact_number) VALUES ($1, $2) RETURNING *',
+            [name, number]
+        );
+        return res.status(201).json({ message: 'supplier created', data: rows[0] });
+    } catch (error) {
+res.status(500).json({ message: 'Error creating supplier', error: error.message });    }
+
+})
+
+
+
+
+// ***************sales**********
+
+
+// Get all Sales
+app.get("/Sales", async (req, res) => {
+    try {
+        const { rows } = await pool.query('SELECT * FROM Sales');
+    return res.status(200).json({message:'done', data: rows });
+    } catch (error) {
+        res.status(500).json({message:'error', error: error.message})
+    }
+});
+
+//Retrieve sales for a specific product.
+app.get("/Sales/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { rows } = await pool.query('SELECT * FROM Sales WHERE product_id = $1', [id]);
+    return res.status(200).json({ data:rows });
+    } catch (error) {
+        json({message:'error', error: error.message})
+    }
+});
+
+// Create a new Sales
+app.post ("/Sales", async (req , res)=>{
+
+    const {product_id ,sold} = req.body
+
+    try {
+        const { rows } = await pool.query(
+            'INSERT INTO Sales (product_id, quantity_sold) VALUES ($1, $2) RETURNING *',
+            [product_id, sold]
+        );
+        return res.status(201).json({ message: 'Product created', data: rows[0] });
+    } catch (error) {
+res.status(500).json({ message: 'Error creating product', error: error.message });    }
+
+})
+
+
+
+
+//*************** Add a Category column to the Products table. */
+
+
+app.post("/products/CreateCategory", async (req , res)=>{
+
+   
+
+    try {
+         const query = `ALTER TABLE products ADD column Category VARCHAR(30)`;
+
+         await pool.query(query);
+        // const { rows } = await pool.query(query);
+        return res.status(201).json({ message: 'Category column added' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error adding Category column', error: error.message });
+    }
+
+
+})
+
+
+//*************** Remove the Category column.************/
+
+app.post("/products/RemoveCategory", async (req , res)=>{
+
+   
+
+    try {
+         const query = `ALTER TABLE products DROP COLUMN Category`;
+
+         await pool.query(query);
+        // const { rows } = await pool.query(query);
+        return res.status(201).json({ message: 'Category column removed' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error removing Category column', error: error.message });
+    }
+
+
+})
+
+//***********Change ContactNumber to VARCHAR(15). */
+
+
+
+app.post("/suppliers/ChangeNumber", async (req , res)=>{
+    try {
+         const query = `ALTER TABLE suppliers
+ALTER COLUMN contact_number TYPE VARCHAR(15) `;
+
+         await pool.query(query);
+        // const { rows } = await pool.query(query);
+        return res.status(201).json({ message: 'Contact number type changed' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error changing contact number type', error: error.message });
+    }
+
+})
+
+
+//******************Add a NOT NULL constraint to ProductName.
+
+
+app.post("/products/SetNotNull", async (req , res)=>{
+
+   
+
+    try {
+         const query = `ALTER TABLE products ALTER COLUMN product_name SET NOT NULL`;
+
+         await pool.query(query);
+        // const { rows } = await pool.query(query);
+        return res.status(201).json({ message: 'Product name constraint set' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error setting product name constraint', error: error.message });
     }
 })
 
 
-// update user bt id
-app.patch('/user/:id', async (req , res)=>{
-    const id = Number(req.params.id);
-    const {name , age , email} = req.body;
-
-    const users = await getUsers();
-    const user = users.find(user => user.id == id);
-
-    if(!user) return res.status(404).json({message: 'Users not found'});
-
-    if(email){
-        const existEmail = users.some(user => user.email === email && user.id !== id);
-        if(existEmail) {
-            return res.status(400).json({message: 'Email already exists'});
-        }
-        user.email = email
-    }
-    if (name) user.name = name;
-    if (age) user.age = age;
-
-    await saveUser(users);
-
-
-    return res.status(200).json({message: 'User updated successfully'});
-
-})
-
-// delete user by id
-
-app.delete('/user/:id', async (req , res)=>{
-    const {id} = req.params;
-    const users = await getUsers();
-
-    const userIndex = users.findIndex(user => user.id == id);
-
-    if(userIndex === -1) return res.status(404).json({message: 'Users not found'});
-
-    users.splice(userIndex , 1);
-    
-    await saveUser(users);
-
-    return res.status(200).json({message: 'User Delete successfully'});
-})
-
-
-//get user by name
-
-app.get('/search/getByName', async (req , res)=>{
-
-    const query = req.query;
-    const users = await getUsers();
-
-    const user = users.filter(user=>user.name == query.name);
-    
-    if(user.length === 0) return res.status(404).json({message: 'Users not found'});
-
-    return res.json({message: "user is found" ,  user});
-})
+//*************Create an API endpoint or initialization script to insert the following data:( 1.5 Grade)
+//***********a. Add a supplier with the name 'FreshFoods' and contact number '01001234567'. */
 
 
 
-// get all users
+app.post("/supplier", async (req, res) => {
+    const { name, contact } = req.query;
 
-app.get('/user', async (req , res)=>{
-    
     try {
-        const users = await getUsers();
-    return res.json({users});
+        const { rows } = await pool.query(
+            `INSERT INTO suppliers (supplier_name, contact_number)
+             VALUES ($1, $2)
+             RETURNING *`,
+            [name, contact]
+        );
+
+        return res.status(201).json({
+            message: "Supplier added successfully",
+            data: rows[0]
+        });
+
     } catch (error) {
-        return res.status(404).json({message: 'Users not found'});
-    }   
+        return res.status(500).json({
+            message: "Error adding supplier",
+            error: error.message
+        });
+    }
+});
+
+
+
+//************b. Insert the following three products, all provided by 'FreshFoods': */
+
+app.post("/Add_products", async (req, res) => {
+
+    const { name, price, stock, supplier } = req.query;
+
+    try {
+        const { rows } = await pool.query(
+            `INSERT INTO products
+             (product_name, price, stock_quantity, supplier_id)
+             VALUES ($1, $2, $3, $4)
+             RETURNING *`,
+            [name, price, stock, supplier]
+        );
+
+        return res.status(201).json({
+            message: "Product created successfully",
+            data: rows[0]
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            message: "Error creating product",
+            error: error.message
+        });
+    }
+});
+
+//**************c. Add a record for the sale of 2 units of 'Milk' made on '2025-05-20'. */
+
+app.post("/Add_Sales", async (req, res) => {
+
+    const { unit , time , product_id } = req.query;
+
+    try {
+        const { rows } = await pool.query(
+            `INSERT INTO sales
+             (quantity_sold, sale_date, product_id)
+             VALUES ($1, $2, $3)
+             RETURNING *`,
+            [unit, time, product_id]
+        );
+
+        return res.status(201).json({
+            message: "Product created successfully",
+            data: rows[0]
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            message: "Error creating product",
+            error: error.message
+        });
+    }
+});
+
+//**************7. Create an API endpoint to update the price of 'Bread' to 25.00.  */
+app.patch ("/update_product", async (req , res)=>{
+
+    const {name , price} = req.body
+
+    try {
+        const { rows } = await pool.query(
+            'UPDATE products SET price = $1 WHERE product_name = $2 RETURNING *',
+            [price, name]
+        );
+        return res.status(200).json({ message: 'Product updated', data: rows[0] });
+    } catch (error) {
+        return res.status(500).json({ message: 'Error updating product', error: error.message });
+    }
+
 })
 
+//******************Create an API endpoint to delete the product 'Eggs'. */
 
-//get user by filter age
+app.delete ("/Delete_product", async (req , res)=>{
 
-app.get('/search/getByAge', async (req , res)=>{
+    const {name} = req.body
 
-    const query = req.query;
-    const users = await getUsers();
+    try {
+        const { rows } = await pool.query(
+            'DELETE FROM products WHERE product_name = $1 RETURNING *',
+            [name]
+        );
+        return res.status(200).json({ message: 'Product deleted', data: rows[0] });
+    } catch (error) {
+        return res.status(500).json({ message: 'Error deleting product', error: error.message });
+    }
 
- const user = users.filter(user=>user.age >= query.age); 
-    if(user.length === 0) return res.status(404).json({message: 'Users not found'});
-
-    return res.json({message: "user is found" ,  user});
 })
 
+//*****************Create a reporting endpoint to retrieve the total quantity sold for each product using SQL aggregate functions. */
 
-//get user by id
 
-app.get('/user/:id', async (req , res)=>{
+app.get("/reports_products_sales", async (req, res) => {
 
-    const {id} = req.params;
-    const users = await getUsers();
+    try {
+        const { rows } = await pool.query(`
+            SELECT
+                p.product_id,
+                p.product_name,
+                SUM(s.quantity_sold) AS total_quantity_sold
+            FROM products p
+            JOIN sales s
+                ON p.product_id = s.product_id
+            GROUP BY
+                p.product_id,
+                p.product_name
+            ORDER BY
+                p.product_id
+        `);
 
-    const user = users.find(user=>user.id == id);
-    
-    if(!user) return res.status(404).json({message: 'Users not found'});
+        return res.status(200).json({
+            message: "Total quantity sold for each product",
+            data: rows
+        });
 
-    return res.json({message: "user is found" , user});
-})
+    } catch (error) {
+        return res.status(500).json({
+            message: "Error generating sales report",
+            error: error.message
+        });
+    }
+});
+
+
+//**************Create a reporting endpoint to retrieve the product with the highest stock quantity. */
+
+app.get("/reports_products_highest_stock", async (req, res) => {
+
+    try {
+        const { rows } = await pool.query(`
+            SELECT
+                p.product_id,
+                p.product_name,
+                price,
+                stock_quantity
+            FROM products p
+            ORDER BY stock_quantity DESC
+            limit 1
+        `);
+           
+
+        return res.status(200).json({
+            message: "Total quantity sold for each product",
+            data: rows
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            message: "Error generating sales report",
+            error: error.message
+        });
+    }
+});
+
+//*********************Create a reporting endpoint to retrieve suppliers whose names start with 'F'. */
+
+app.get("/reports_suppliers_starting_with_f", async (req, res) => {
+
+    try {
+        const { rows } = await pool.query(`
+            SELECT
+                *
+            FROM suppliers s
+            where supplier_name like 'F%'
+        `);
+           
+
+        return res.status(200).json({
+            message: "Suppliers whose names start with 'F'",
+            data: rows
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            message: "Error generating sales report",
+            error: error.message
+        });
+    }
+});
+
+
+
+//*****************Create a reporting endpoint to retrieve all products that have never been sold. */
+app.get("/reports_products_never_sold", async (req, res) => {
+
+    try {
+        const { rows } = await pool.query(`
+            SELECT
+                *
+            FROM products p
+            WHERE Not EXISTS (
+                SELECT 1
+                FROM sales s
+                WHERE s.product_id = p.product_id
+            )
+            ORDER BY p.product_id;
+        `);
+           
+
+        return res.status(200).json({
+            message: "Products that have never been sold",
+            data: rows
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            message: "Error generating sales report",
+            error: error.message
+        });
+    }
+});
+
+//********************13. Create a reporting endpoint to retrieve all sales including
+// * Product name
+// * Quantity sold
+// * Sale date using SQL JOIN operations. 
+
+app.get("/reports_sales_including_details", async (req, res) => {
+
+    try {
+        const { rows } = await pool.query(`
+            SELECT
+                p.product_name,
+                s.quantity_sold,
+                s.sale_date
+            FROM products p
+            JOIN sales s ON p.product_id = s.product_id
+        `);
+           
+
+        return res.status(200).json({
+            message: "Sales with product details",
+            data: rows
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            message: "Error generating sales report",
+            error: error.message
+        });
+    }
+});
+
+//**************14. Create a SQL script or secure administrative endpoint to create a MySQL user named store_manager and grant the
+//****************  following permissions on all tables
+// * SELECT
+// * INSERT
+// * UPDATE 
+
+
 
 
 
 app.listen(port, () => {
-    console.log(`Listening on port ${port}`)
+    console.log(`Server is running on http://localhost:${port}`);
 })
